@@ -92,7 +92,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Qwen-Image-2.1 local", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5180", "http://127.0.0.1:5180"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -311,4 +311,4 @@ else:
 
     @app.get("/", include_in_schema=False)
     async def index() -> JSONResponse:
-        return JSONResponse({"message": "backend running; build the frontend (npm run build) or use the Vite dev server on :5173"})
+        return JSONResponse({"message": "backend running; build the frontend (npm run build) or use the Vite dev server on :5180"})

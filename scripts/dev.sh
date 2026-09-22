@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the backend (which launches sd-server) and the Vite dev server together.
-# Usage: scripts/dev.sh          -> backend on :8000, frontend on :5173
+# Usage: scripts/dev.sh          -> backend on :8000, frontend on :5180
 #        scripts/dev.sh --prod   -> build the frontend and serve everything from :8000
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

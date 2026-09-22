@@ -8,7 +8,7 @@ behind a small FastAPI backend and a React + TypeScript web UI.
 ┌──────────────┐   /api/*    ┌──────────────────┐  /sdcpp/v1/*  ┌──────────────────────────┐
 │ React + Vite │ ──────────▶ │ FastAPI backend  │ ────────────▶ │ sd-server                │
 │ frontend     │ ◀────────── │ job proxy,       │ ◀──────────── │ (stable-diffusion.cpp)   │
-│ :5173        │  /outputs/* │ gallery, logs    │               │ Metal / CUDA / Vulkan    │
+│ :5180        │  /outputs/* │ gallery, logs    │               │ Metal / CUDA / Vulkan    │
 └──────────────┘             │ :8000            │               │ :1234                    │
                              └──────────────────┘               └──────────────────────────┘
 ```
@@ -35,10 +35,10 @@ Swap the DiT for the stock weights with `--dit base`, or a different quant with 
 ```bash
 git clone <this repo> && cd qwen-2.1-image-abliterated
 scripts/setup.sh          # venv + deps, frontend deps, sd.cpp binary, model download (~11.5 GB)
-scripts/dev.sh            # backend :8000 (launches sd-server) + Vite dev server :5173
+scripts/dev.sh            # backend :8000 (launches sd-server) + Vite dev server :5180
 ```
 
-Open http://localhost:5173. The status bar turns green once sd-server has loaded the weights (~10 s on an M4 Pro, longer from cold disk cache).
+Open http://localhost:5180. The status bar turns green once sd-server has loaded the weights (~10 s on an M4 Pro, longer from cold disk cache).
 
 Production-style single port (build the UI, serve it from FastAPI):
 
