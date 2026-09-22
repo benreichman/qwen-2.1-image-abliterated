@@ -1,0 +1,21 @@
+# model weights (download with scripts/download_models.py)
+models/
+# engine binaries (download with scripts/fetch_engine.sh)
+engine/bin/
+# generated images + logs
+outputs/
+# python
+backend/.venv/
+__pycache__/
+*.pyc
+backend/.env
+# node
+frontend/node_modules/
+frontend/dist/
+# os / editors
+.DS_Store
+.vscode/
+.idea/
+!models/**/.gitkeep
+!outputs/.gitkeep
+!engine/bin/.gitkeep
