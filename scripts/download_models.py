@@ -6,12 +6,14 @@ Components (all GGUF/safetensors, loaded by stable-diffusion.cpp):
   * DiT (the image model itself)     -> models/diffusion_models/
   * Text encoder (Heretic-abliterated Qwen3-VL-8B) + vision projector -> models/text_encoders/
   * VAE                                -> models/vae/
+  * Pruna few-step LoRA (turbo mode)   -> models/loras/   (optional, 335 MB each)
 
 Usage:
     python scripts/download_models.py                # defaults (Q4_K_M DiT, uncensored variant)
     python scripts/download_models.py --dit-quant Q6_K
     python scripts/download_models.py --dit base     # stock Qwen-Image-2.1 DiT instead of the UC one
     python scripts/download_models.py --no-vision    # skip mmproj (text-to-image only, no editing)
+    python scripts/download_models.py --lora both    # also grab the 5-step LoRA (--lora none to skip)
 """
 from __future__ import annotations
 
@@ -47,6 +49,13 @@ TEXT_ENCODER_MMPROJ = "mmproj-qwen3vl_8b_heretic-f16.gguf"
 VAE_REPO = "abenzerps/Qwen-Image-2.1-Uncensored-GGUF"
 VAE_FILE = "vae/qwen_image_2.1_vae_bf16.safetensors"
 
+# Few-step distillation LoRAs (optional "turbo" mode): https://huggingface.co/PrunaAI/Pruna-Qwen-Image-2.1
+LORA_REPO = "PrunaAI/Pruna-Qwen-Image-2.1"
+LORA_FILES = {
+    "8step": "p_qwen_image_2.1_8step_v0.1.safetensors",
+    "5step": "p_qwen_image_2.1_5step_v0.1.safetensors",
+}
+
 
 def fetch(repo: str, filename: str, dest_dir: Path, revision: str = "main") -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +81,9 @@ def main() -> int:
     ap.add_argument("--dit", choices=DIT_SOURCES.keys(), default="uc", help="DiT variant (default: uc)")
     ap.add_argument("--dit-quant", default="Q4_K_M", help="DiT quantization (default: Q4_K_M)")
     ap.add_argument("--no-vision", action="store_true", help="skip the vision projector (disables image editing)")
-    ap.add_argument("--only", choices=["dit", "te", "vae"], help="download a single component")
+    ap.add_argument("--lora", choices=["8step", "5step", "both", "none"], default="8step",
+                    help="Pruna few-step LoRA(s) for turbo mode (default: 8step)")
+    ap.add_argument("--only", choices=["dit", "te", "vae", "lora"], help="download a single component")
     args = ap.parse_args()
 
     src = DIT_SOURCES[args.dit]
@@ -92,6 +103,10 @@ def main() -> int:
     if args.only in (None, "vae"):
         print("VAE:")
         fetch(VAE_REPO, VAE_FILE, MODELS / "vae")
+    if args.only in (None, "lora") and args.lora != "none":
+        print("Few-step LoRA (Pruna, turbo mode):")
+        for variant in (["8step", "5step"] if args.lora == "both" else [args.lora]):
+            fetch(LORA_REPO, LORA_FILES[variant], MODELS / "loras")
 
     print("\nAll done. Set the paths in backend/.env (see .env.example) if you changed variants.")
     return 0

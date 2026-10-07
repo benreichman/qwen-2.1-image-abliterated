@@ -20,6 +20,7 @@ const DEFAULT_PARAMS: GenerateParams = {
   ref_images: [],
   strength: 1.0,
   output_format: 'png',
+  accelerator: 'none',
 }
 
 export default function App() {
@@ -75,6 +76,7 @@ export default function App() {
       seed: img.seed ?? Number(p.seed ?? -1),
       sampler: String(p.sampler ?? params.sampler),
       transparent: Boolean(p.transparent),
+      accelerator: String(p.accelerator ?? 'none'),
     })
   }
 

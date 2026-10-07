@@ -104,6 +104,7 @@ trades quality for memory or time; turn them up as far as your hardware allows.
 | CFG | 4.0 | 4–6 | Stronger prompt adherence; taste, not a compromise. |
 | VAE | bf16 | bf16 | Already full quality. |
 | Flash attention | on | on | No quality cost, keep it on. |
+| Turbo LoRA | off | off for final renders; on for iteration | 8 steps without CFG ≈ 10× less DiT work, at a quality cost (see below). |
 
 Memory budget for the whole set (weights only; add ~3–5 GB of compute buffers at 2K):
 
@@ -137,6 +138,26 @@ In the UI, pick the **2K** size tier and drag steps to 40. To make those the def
 `default_width`, `default_height` (and `default_cfg`) in `backend/app/config.py`, and `DEFAULT_PARAMS` in
 `frontend/src/App.tsx`. The frontend remembers your last-used settings in `localStorage`, so after the first change
 they stick anyway.
+
+### Turbo mode: Pruna few-step LoRAs (8 or 5 steps, no CFG)
+
+[PrunaAI/Pruna-Qwen-Image-2.1](https://huggingface.co/PrunaAI/Pruna-Qwen-Image-2.1) ships DMD-distilled LoRA
+adapters that let the *same* base model, text encoder and VAE finish in 8 steps (recommended) or 5 steps (faster,
+visibly worse) with CFG off. Versus the 40-step/CFG reference that is roughly 10× less DiT work; Pruna reports up to
+6.3× wall-clock on an H100. v0.1 does not match base-model quality, so think of it as a draft/iteration mode.
+
+- `scripts/download_models.py` fetches the 8-step adapter by default (335 MB) into `models/loras/`;
+  `--lora both` adds the 5-step one, `--lora none` skips them.
+- In the UI pick **Mode → Turbo · Pruna 8-step**. Steps, CFG and the sigma schedule are locked to what the adapter
+  was trained for; the negative prompt is hidden because the adapter runs without CFG.
+- API: `"accelerator": "pruna-8step"` (or `"pruna-5step"`) on `/api/generate`. The backend adds the LoRA, sets
+  `custom_sigmas` to the adapter's schedule (`1, 14/15, 6/7, 10/13, 2/3, 6/11, 0.4, 2/9, 0` for 8 steps) and CFG 1.0.
+- Trained at 1K only: use the 1K presets and at most 3 reference images for edits. Write detailed prompts; short
+  prompts degrade noticeably with the distilled adapters.
+- Implementation note: the adapters are PEFT files (`r=64`, `lora_alpha=128`) with no `.alpha` tensors. sd.cpp then
+  assumes alpha == rank, so the backend applies them with multiplier **2.0** to reproduce diffusers' `alpha / r`
+  scaling. Other LoRAs can be passed explicitly via `"lora": [{"path": "file.safetensors", "multiplier": 1.0}]`
+  (paths relative to `QI_LORA_DIR`).
 
 ### Low on memory (VRAM or unified)
 

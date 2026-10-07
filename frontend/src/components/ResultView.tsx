@@ -77,6 +77,12 @@ export function ResultView({ job, engine, selected, onUseAsReference, onReuseSet
           <dd>{selected.seed ?? (p.seed === -1 ? 'random' : String(p.seed))}</dd>
           <dt>Sampler</dt>
           <dd>{String(p.sampler)}</dd>
+          {p.accelerator && p.accelerator !== 'none' ? (
+            <>
+              <dt>Mode</dt>
+              <dd>{String(p.accelerator)}</dd>
+            </>
+          ) : null}
           {p.ref_image_count ? (
             <>
               <dt>Refs</dt>

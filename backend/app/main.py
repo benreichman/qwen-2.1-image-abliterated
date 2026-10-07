@@ -44,6 +44,47 @@ SIZE_PRESETS = [
 ]
 
 
+# Few-step distillation LoRAs (PrunaAI/Pruna-Qwen-Image-2.1). Each adapter is trained for a fixed sigma
+# schedule, no CFG, and strength 1.0. sd.cpp's sigma array includes the terminal 0 (steps + 1 values).
+# The adapters are PEFT files with lora_alpha=128 / r=64 but no `.alpha` tensors; sd.cpp then assumes
+# alpha == rank, so a 2.0 multiplier reproduces diffusers' alpha/r scaling.
+ACCELERATORS: dict[str, dict[str, Any]] = {
+    "none": {"label": "Base model (full quality)", "steps": None, "cfg_scale": None, "lora": None, "sigmas": None},
+    "pruna-8step": {
+        "label": "Turbo · Pruna 8-step LoRA",
+        "file": "p_qwen_image_2.1_8step_v0.1.safetensors",
+        "steps": 8,
+        "cfg_scale": 1.0,
+        "multiplier": 2.0,
+        "sigmas": [1.0, 14 / 15, 6 / 7, 10 / 13, 2 / 3, 6 / 11, 0.4, 2 / 9, 0.0],
+        "note": "Recommended turbo mode. Trained at 1K; keep CFG off and use ≤3 reference images.",
+    },
+    "pruna-5step": {
+        "label": "Turbo · Pruna 5-step LoRA",
+        "file": "p_qwen_image_2.1_5step_v0.1.safetensors",
+        "steps": 5,
+        "cfg_scale": 1.0,
+        "multiplier": 2.0,
+        "sigmas": [1.0, 0.94, 6 / 7, 2 / 3, 0.4, 0.0],
+        "note": "Fastest; visibly lower quality than 8-step.",
+    },
+}
+
+
+def available_accelerators() -> list[dict[str, Any]]:
+    out = []
+    for key, a in ACCELERATORS.items():
+        file = a.get("file")
+        available = True if file is None else (settings.lora_dir / file).exists()
+        out.append({"id": key, "label": a["label"], "steps": a["steps"], "cfg_scale": a["cfg_scale"], "available": available, "note": a.get("note"), "file": file})
+    return out
+
+
+class LoraRef(BaseModel):
+    path: str  # relative to QI_LORA_DIR
+    multiplier: float = 1.0
+
+
 class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     negative_prompt: str = ""
@@ -59,6 +100,9 @@ class GenerateRequest(BaseModel):
     ref_images: list[str] = Field(default_factory=list, max_length=10)  # data URLs / base64
     strength: float = Field(default=1.0, ge=0.0, le=1.0)
     output_format: Literal["png", "jpeg", "webp"] = "png"
+    accelerator: str = "none"  # key of ACCELERATORS; overrides steps/cfg/sigmas and adds its LoRA
+    lora: list[LoraRef] = Field(default_factory=list)  # extra LoRAs (relative to QI_LORA_DIR)
+    custom_sigmas: list[float] | None = None  # steps + 1 values ending in 0; overrides the scheduler
 
 
 class JobRecord(BaseModel):
@@ -112,11 +156,25 @@ def _build_engine_body(req: GenerateRequest) -> dict[str, Any]:
     prompt = req.prompt.strip()
     if req.transparent and not prompt.startswith(RGBA_PREFIX.strip()):
         prompt = f"{RGBA_PREFIX}{prompt.rstrip('.')}.{RGBA_SUFFIX}"
+    steps, cfg, sigmas = req.steps, req.cfg_scale, req.custom_sigmas
+    loras = [{"path": l.path, "multiplier": l.multiplier} for l in req.lora]
+    accel = ACCELERATORS.get(req.accelerator)
+    if accel is None:
+        raise HTTPException(status_code=422, detail=f"unknown accelerator {req.accelerator!r}; one of {list(ACCELERATORS)}")
+    if accel.get("file"):
+        if not (settings.lora_dir / accel["file"]).exists():
+            raise HTTPException(status_code=422, detail=f"LoRA {accel['file']} not found in {settings.lora_dir}; run scripts/download_models.py --only lora")
+        steps, cfg, sigmas = accel["steps"], accel["cfg_scale"], accel["sigmas"]
+        loras.insert(0, {"path": accel["file"], "multiplier": accel["multiplier"]})
     sample_params: dict[str, Any] = {
         "sample_method": req.sampler,
-        "sample_steps": req.steps,
-        "guidance": {"txt_cfg": req.cfg_scale},
+        "sample_steps": steps,
+        "guidance": {"txt_cfg": cfg},
     }
+    if sigmas:
+        if len(sigmas) != steps + 1:
+            raise HTTPException(status_code=422, detail="custom_sigmas must have steps + 1 values (ending in 0)")
+        sample_params["custom_sigmas"] = sigmas
     if req.scheduler:
         sample_params["scheduler"] = req.scheduler
     body: dict[str, Any] = {
@@ -130,6 +188,8 @@ def _build_engine_body(req: GenerateRequest) -> dict[str, Any]:
         "output_format": req.output_format,
         "embed_image_metadata": True,
     }
+    if loras:
+        body["lora"] = loras
     if req.ref_images:
         body["ref_images"] = req.ref_images
         body["strength"] = req.strength
@@ -194,6 +254,7 @@ async def config() -> dict[str, Any]:
             "sampler": settings.default_sampler,
         },
         "size_presets": SIZE_PRESETS,
+        "accelerators": available_accelerators(),
         "models": engine.status()["models"],
     }
 
@@ -218,6 +279,9 @@ async def generate(req: GenerateRequest) -> JobRecord:
     params = req.model_dump(exclude={"ref_images"})
     params["ref_image_count"] = len(req.ref_images)
     params["resolved_prompt"] = body["prompt"]
+    params["steps"] = body["sample_params"]["sample_steps"]
+    params["cfg_scale"] = body["sample_params"]["guidance"]["txt_cfg"]
+    params["lora"] = body.get("lora", [])
     record = JobRecord(job_id=submitted["id"], status=submitted.get("status", "queued"), created=submitted.get("created", time.time()), params=params)
     _track(record)
     return record

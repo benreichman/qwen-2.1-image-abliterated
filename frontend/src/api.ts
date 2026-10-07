@@ -32,9 +32,20 @@ export interface SizePreset {
   tier: '1K' | '2K'
 }
 
+export interface Accelerator {
+  id: string
+  label: string
+  steps: number | null
+  cfg_scale: number | null
+  available: boolean
+  note: string | null
+  file: string | null
+}
+
 export interface AppConfig {
   defaults: { width: number; height: number; steps: number; cfg_scale: number; sampler: string }
   size_presets: SizePreset[]
+  accelerators: Accelerator[]
   models: EngineStatus['models']
 }
 
@@ -52,6 +63,7 @@ export interface GenerateParams {
   ref_images: string[]
   strength: number
   output_format: 'png' | 'jpeg' | 'webp'
+  accelerator: string
 }
 
 export interface ImageRecord {

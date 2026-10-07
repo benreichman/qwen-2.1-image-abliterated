@@ -316,6 +316,26 @@ kbd {
   color: var(--accent);
 }
 
+.modes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modes button {
+  justify-content: flex-start;
+  font-size: 13px;
+}
+
+.modes button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+input[type="range"]:disabled {
+  opacity: 0.4;
+}
+
 .refs {
   display: flex;
   flex-wrap: wrap;

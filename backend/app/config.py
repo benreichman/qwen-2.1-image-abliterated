@@ -50,6 +50,7 @@ class Settings:
         default_factory=lambda: _env_path("QI_TEXT_ENCODER_VISION", "models/text_encoders/mmproj-qwen3vl_8b_heretic-f16.gguf")
     )
     vae: Path = field(default_factory=lambda: _env_path("QI_VAE", "models/vae/qwen_image_2.1_vae_bf16.safetensors"))
+    lora_dir: Path = field(default_factory=lambda: _env_path("QI_LORA_DIR", "models/loras"))
 
     # --- engine (stable-diffusion.cpp sd-server) ---------------------------
     engine_binary: Path = field(default_factory=lambda: _env_path("QI_ENGINE_BINARY", "engine/bin/sd-server"))
@@ -94,6 +95,8 @@ class Settings:
         ]
         if self.text_encoder_vision and self.text_encoder_vision.exists():
             args += ["--llm_vision", str(self.text_encoder_vision)]
+        if self.lora_dir.is_dir():
+            args += ["--lora-model-dir", str(self.lora_dir)]
         if self.engine_flash_attention:
             args.append("--diffusion-fa")
         if self.engine_offload_to_cpu:

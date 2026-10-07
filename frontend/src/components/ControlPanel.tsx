@@ -22,6 +22,9 @@ export function ControlPanel({ params, onChange, onGenerate, onCancel, busy, dis
   const presets = (config?.size_presets ?? []).filter((p) => p.tier === tier)
   const samplers = caps?.samplers?.length ? caps.samplers : FALLBACK_SAMPLERS
   const editing = params.ref_images.length > 0
+  const accelerators = config?.accelerators ?? []
+  const accel = accelerators.find((a) => a.id === params.accelerator)
+  const turbo = !!accel && accel.steps != null
 
   const addRefs = async (files: FileList | null) => {
     if (!files) return
@@ -44,10 +47,12 @@ export function ControlPanel({ params, onChange, onGenerate, onCancel, busy, dis
         />
       </label>
 
-      <label className="field">
-        <span className="label">Negative prompt</span>
-        <textarea value={params.negative_prompt} onChange={(e) => set('negative_prompt', e.target.value)} rows={2} placeholder="(optional)" />
-      </label>
+      {!turbo && (
+        <label className="field">
+          <span className="label">Negative prompt</span>
+          <textarea value={params.negative_prompt} onChange={(e) => set('negative_prompt', e.target.value)} rows={2} placeholder="(optional)" />
+        </label>
+      )}
 
       <div className="field">
         <span className="label">
@@ -104,18 +109,39 @@ export function ControlPanel({ params, onChange, onGenerate, onCancel, busy, dis
         </div>
       </div>
 
+      {accelerators.length > 1 && (
+        <div className="field">
+          <span className="label">Mode</span>
+          <div className="modes">
+            {accelerators.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                className={params.accelerator === a.id ? 'on' : ''}
+                disabled={!a.available}
+                title={a.available ? (a.note ?? '') : `${a.file} not downloaded — run scripts/download_models.py --only lora --lora both`}
+                onClick={() => set('accelerator', a.id)}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+          {accel?.note && <small className="muted">{accel.note}</small>}
+        </div>
+      )}
+
       <div className="grid2">
         <label className="field">
           <span className="label">
-            Steps <b>{params.steps}</b>
+            Steps <b>{turbo ? accel!.steps : params.steps}</b>
           </span>
-          <input type="range" min={4} max={50} value={params.steps} onChange={(e) => set('steps', Number(e.target.value))} />
+          <input type="range" min={4} max={50} value={turbo ? accel!.steps! : params.steps} disabled={turbo} onChange={(e) => set('steps', Number(e.target.value))} />
         </label>
         <label className="field">
           <span className="label">
-            CFG <b>{params.cfg_scale.toFixed(1)}</b>
+            CFG <b>{(turbo ? accel!.cfg_scale! : params.cfg_scale).toFixed(1)}</b>
           </span>
-          <input type="range" min={1} max={10} step={0.5} value={params.cfg_scale} onChange={(e) => set('cfg_scale', Number(e.target.value))} />
+          <input type="range" min={1} max={10} step={0.5} value={turbo ? accel!.cfg_scale! : params.cfg_scale} disabled={turbo} onChange={(e) => set('cfg_scale', Number(e.target.value))} />
         </label>
       </div>
 
