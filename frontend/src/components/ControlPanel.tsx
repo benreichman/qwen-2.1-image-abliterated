@@ -14,6 +14,15 @@ interface Props {
 
 const FALLBACK_SAMPLERS = ['euler', 'euler_a', 'dpm++2m', 'res_multistep', 'lcm']
 
+function imageDims(src: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
+    img.onerror = () => resolve(null)
+    img.src = src
+  })
+}
+
 export function ControlPanel({ params, onChange, onGenerate, onCancel, busy, disabled, config, caps }: Props) {
   const [tier, setTier] = useState<'1K' | '2K'>('1K')
   const [advanced, setAdvanced] = useState(false)
@@ -29,7 +38,21 @@ export function ControlPanel({ params, onChange, onGenerate, onCancel, busy, dis
   const addRefs = async (files: FileList | null) => {
     if (!files) return
     const urls = await Promise.all(Array.from(files).slice(0, 10 - params.ref_images.length).map(fileToDataUrl))
-    set('ref_images', [...params.ref_images, ...urls])
+    const next: GenerateParams = { ...params, ref_images: [...params.ref_images, ...urls] }
+    // sd.cpp center-crops reference images to the output aspect ratio, so when the first
+    // reference is added, snap the output size to the closest preset in the current tier.
+    if (params.ref_images.length === 0 && urls.length > 0 && config) {
+      const dims = await imageDims(urls[0])
+      if (dims) {
+        const target = dims.width / dims.height
+        const best = config.size_presets
+          .filter((p) => p.tier === tier)
+          .reduce((a, b) => (Math.abs(b.width / b.height - target) < Math.abs(a.width / a.height - target) ? b : a))
+        next.width = best.width
+        next.height = best.height
+      }
+    }
+    onChange(next)
   }
 
   return (
@@ -56,7 +79,7 @@ export function ControlPanel({ params, onChange, onGenerate, onCancel, busy, dis
 
       <div className="field">
         <span className="label">
-          Reference images <small>{params.ref_images.length}/10 · turns the request into an edit</small>
+          Reference images <small>{params.ref_images.length}/10 · edit mode · output size snaps to the first image's aspect</small>
         </span>
         <div className="refs">
           {params.ref_images.map((src, i) => (

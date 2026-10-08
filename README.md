@@ -161,11 +161,38 @@ visibly worse) with CFG off. Versus the 40-step/CFG reference that is roughly 10
 
 ### Low on memory (VRAM or unified)
 
-- `QI_ENGINE_EXTRA_ARGS=--params-backend te=disk` streams the text encoder from disk each prompt (once per image,
-  ~5 s) and keeps ~5.4 GB out of resident memory.
+**The VAE is the memory hog, not the DiT.** Decoding a 1024² image needs about **8.8 GB of scratch** on top of the
+~10.4 GB of weights. On a 24 GB Mac that overflows the ~17.7 GB Metal budget, and sd.cpp either swaps for minutes or
+fails and retries tiled. Measured on an M4 Pro 24 GB (1024², turbo 8-step, same seed):
+
+| Engine flags | Prompt enc. | Sampling (8 steps) | VAE decode | Total |
+| --- | ---: | ---: | ---: | ---: |
+| none (weights all on GPU) | 7 s | 301 s | 308 s (swapping) | 616 s |
+| `--vae-conv-direct --vae-tiling` | 5 s | 251 s | 9 tiles × 66 s ≈ 600 s | cancelled |
+| `--vae-tiling` | 5 s | 240 s | 9 tiles × 55 s ≈ 500 s | cancelled |
+| **`--params-backend te=disk`** | 6 s | 268 s | **207 s**, untiled, no OOM | **483 s** |
+
+So `.env.example` ships with:
+
+```
+QI_ENGINE_EXTRA_ARGS=--params-backend te=disk
+```
+
+- `--params-backend te=disk`: the text encoder is read from disk when a prompt is encoded (~5 s) instead of
+  holding 5.4 GB of GPU memory permanently, which leaves room for the untiled decode.
+- `--vae-tiling`: fits in any memory, but on this Mac each tile costs ~55 s, so it is slower than untiled. Use it
+  only if the untiled decode still fails (e.g. 2K outputs).
+- `--vae-conv-direct`: no faster than im2col on Metal here (66 s/tile). May help on CUDA; untested.
+- The remaining decode cost is the VAE itself on this hardware (a 512² decode takes ~38 s). A GPU with free
+  memory decodes 1024² in seconds; this is a laptop-under-memory-pressure number, not a model property.
 - On discrete GPUs with little VRAM, `QI_ENGINE_OFFLOAD_TO_CPU=true` keeps weights in system RAM and streams them.
-- `--vae-tiling` (via `QI_ENGINE_EXTRA_ARGS`) cuts VAE decode memory at 2K at a small seam-risk cost.
 - Dimensions must be divisible by 32. CFG > 1 doubles the work per step (conditional + unconditional pass).
+
+### Editing with reference images
+
+sd.cpp **center-crops reference images to the output aspect ratio** (e.g. a 964×1556 portrait becomes 964×964 for
+a 1024×1024 output), so match the output preset to the reference. The UI snaps the output size to the closest
+preset when you add the first reference image. Keep edits at the 1K tier with the turbo LoRAs (trained at 1K, ≤3 refs).
 
 ### Speed reference
 
