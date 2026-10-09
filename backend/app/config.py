@@ -70,6 +70,10 @@ class Settings:
 
     # --- backend -----------------------------------------------------------
     outputs_dir: Path = field(default_factory=lambda: _env_path("QI_OUTPUTS_DIR", "outputs"))
+    # Extra browser origins allowed to call the API directly (the Vite proxy / --prod mode need none).
+    cors_origins: list[str] = field(
+        default_factory=lambda: [o.strip() for o in os.environ.get("QI_CORS_ORIGINS", "").split(",") if o.strip()]
+    )
     frontend_dist: Path = field(default_factory=lambda: _env_path("QI_FRONTEND_DIST", "frontend/dist"))
 
     # --- generation defaults (Qwen-Image-2.1) -------------------------------

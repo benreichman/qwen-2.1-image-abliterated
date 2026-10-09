@@ -55,6 +55,39 @@ scripts/dev.sh --prod     # http://127.0.0.1:8000
 `sd-server` into `engine/bin/`. Everything else is identical. With 24 GB+ of VRAM you can use `--dit-quant Q8_0`
 (7.6 GB) or `BF16` (14.2 GB) for better quality.
 
+## Remote rendering: run the server on one machine, use the UI from another
+
+Only the backend + `sd-server` need the GPU and the model files. The UI is static and talks to the backend over
+`/api` and `/outputs`, so a laptop can drive a Mac Studio (or a Linux GPU box) on the same network.
+
+**Simplest: serve everything from the render machine** (no second checkout needed):
+
+```bash
+# on the Studio
+scripts/dev.sh --prod --lan          # builds the UI, serves UI + API on http://<studio>.local:8000
+```
+
+Then open `http://<studio-hostname>.local:8000` from the laptop. Images, gallery and progress all come from the
+Studio; nothing runs locally.
+
+**Alternative: hot-reloading UI on the laptop, backend on the Studio:**
+
+```bash
+# on the Studio
+scripts/dev.sh --prod --lan                      # or: QI_BIND_HOST=0.0.0.0 uvicorn ... (see dev.sh)
+# on the laptop (just the frontend)
+QI_API_URL=http://<studio-hostname>.local:8000 scripts/dev.sh --ui-only
+```
+
+Notes:
+
+- `--lan` binds on `0.0.0.0`. There is **no authentication**: only do this on a trusted home/office network, or put
+  it behind Tailscale/SSH (`ssh -L 8000:127.0.0.1:8000 studio` then use `http://localhost:8000` as usual).
+- `sd-server` itself stays bound to `127.0.0.1` on the render machine; only the FastAPI backend is exposed.
+- Reference images are uploaded as data URLs inside the request, so editing works remotely too.
+- If you ever point a browser directly at the API from a different origin (no proxy), add it to
+  `QI_CORS_ORIGINS=http://laptop.local:5180` on the server.
+
 ## Configuration
 
 Copy `backend/.env.example` to `backend/.env`. Key options:
@@ -65,6 +98,8 @@ Copy `backend/.env.example` to `backend/.env`. Key options:
 | `QI_ENGINE_EXTRA_ARGS` | raw flags for `sd-server`, e.g. `--params-backend te=disk` to keep the text encoder off RAM |
 | `QI_ENGINE_AUTOSTART=false` | run `sd-server` yourself; the backend adopts anything already listening on `:1234` |
 | `QI_ENGINE_OFFLOAD_TO_CPU=true` | keep weights in system RAM, stream to GPU (discrete-GPU machines with little VRAM) |
+| `QI_BIND_HOST`, `QI_PORT` | where the backend listens (`scripts/dev.sh --lan` = `0.0.0.0`) |
+| `QI_CORS_ORIGINS` | comma-separated extra browser origins allowed to call the API directly |
 
 ## API
 
