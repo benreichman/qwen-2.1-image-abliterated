@@ -48,6 +48,16 @@ export default function App() {
   const { job, busy, error, generate, cancel, clearError } = useGeneration(onImages)
   const { status, offline } = useEngineStatus(busy)
 
+  // Re-check config while any model/LoRA file is still missing (e.g. downloads in progress on the server),
+  // so buttons enable themselves without a page refresh.
+  useEffect(() => {
+    if (!config) return
+    const pending = config.models.some((m) => !m.available) || config.accelerators.some((a) => !a.available)
+    if (!pending) return
+    const t = window.setInterval(() => api.config().then(setConfig).catch(() => undefined), 15000)
+    return () => window.clearInterval(t)
+  }, [config])
+
   useEffect(() => {
     api.config().then(setConfig).catch(() => undefined)
     api
