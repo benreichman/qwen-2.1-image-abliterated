@@ -31,9 +31,14 @@ export function ControlPanel({ params, onChange, onGenerate, onCancel, busy, dis
   const presets = (config?.size_presets ?? []).filter((p) => p.tier === tier)
   const samplers = caps?.samplers?.length ? caps.samplers : FALLBACK_SAMPLERS
   const editing = params.ref_images.length > 0
-  const accelerators = config?.accelerators ?? []
+  const models = config?.models ?? []
+  const modelProfile = models.find((m) => m.id === params.model)
+  const distilled = !!modelProfile && modelProfile.steps != null // official Turbo: fixed schedule, no CFG
+  const accelerators = distilled ? [] : (config?.accelerators ?? [])
   const accel = accelerators.find((a) => a.id === params.accelerator)
-  const turbo = !!accel && accel.steps != null
+  const turbo = distilled || (!!accel && accel.steps != null)
+  const lockedSteps = distilled ? modelProfile!.steps! : accel?.steps ?? null
+  const lockedCfg = distilled ? modelProfile!.cfg_scale! : accel?.cfg_scale ?? null
 
   const addRefs = async (files: FileList | null) => {
     if (!files) return
@@ -132,6 +137,27 @@ export function ControlPanel({ params, onChange, onGenerate, onCancel, busy, dis
         </div>
       </div>
 
+      {models.length > 1 && (
+        <div className="field">
+          <span className="label">Model</span>
+          <div className="modes">
+            {models.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={params.model === m.id ? 'on' : ''}
+                disabled={!m.available}
+                title={m.available ? (m.note ?? '') : `${m.file} not downloaded — run scripts/download_models.py`}
+                onClick={() => set('model', m.id)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {modelProfile?.note && <small className="muted">{modelProfile.note}</small>}
+        </div>
+      )}
+
       {accelerators.length > 1 && (
         <div className="field">
           <span className="label">Mode</span>
@@ -156,15 +182,15 @@ export function ControlPanel({ params, onChange, onGenerate, onCancel, busy, dis
       <div className="grid2">
         <label className="field">
           <span className="label">
-            Steps <b>{turbo ? accel!.steps : params.steps}</b>
+            Steps <b>{turbo ? lockedSteps : params.steps}</b>
           </span>
-          <input type="range" min={4} max={50} value={turbo ? accel!.steps! : params.steps} disabled={turbo} onChange={(e) => set('steps', Number(e.target.value))} />
+          <input type="range" min={4} max={50} value={turbo ? lockedSteps! : params.steps} disabled={turbo} onChange={(e) => set('steps', Number(e.target.value))} />
         </label>
         <label className="field">
           <span className="label">
-            CFG <b>{(turbo ? accel!.cfg_scale! : params.cfg_scale).toFixed(1)}</b>
+            CFG <b>{(turbo ? lockedCfg! : params.cfg_scale).toFixed(1)}</b>
           </span>
-          <input type="range" min={1} max={10} step={0.5} value={turbo ? accel!.cfg_scale! : params.cfg_scale} disabled={turbo} onChange={(e) => set('cfg_scale', Number(e.target.value))} />
+          <input type="range" min={1} max={10} step={0.5} value={turbo ? lockedCfg! : params.cfg_scale} disabled={turbo} onChange={(e) => set('cfg_scale', Number(e.target.value))} />
         </label>
       </div>
 

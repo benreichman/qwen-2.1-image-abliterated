@@ -43,6 +43,11 @@ class Settings:
     diffusion_model: Path = field(
         default_factory=lambda: _env_path("QI_DIFFUSION_MODEL", "models/diffusion_models/qwen-image-2.1-UC-Q4_K_M.gguf")
     )
+    # Official 8-step distilled checkpoint (Qwen/Qwen-Image-2.1-Turbo), same architecture/TE/VAE as base.
+    diffusion_model_turbo: Path = field(
+        default_factory=lambda: _env_path("QI_DIFFUSION_MODEL_TURBO", "models/diffusion_models/qwen-image-2.1-turbo-Q4_K.gguf")
+    )
+    default_model: str = field(default_factory=lambda: os.environ.get("QI_DEFAULT_MODEL", "base"))
     text_encoder: Path = field(
         default_factory=lambda: _env_path("QI_TEXT_ENCODER", "models/text_encoders/qwen3vl_8b_heretic-Q4_K_M.gguf")
     )
@@ -78,12 +83,41 @@ class Settings:
     def engine_url(self) -> str:
         return f"http://{self.engine_host}:{self.engine_port}"
 
-    def engine_args(self) -> list[str]:
+    def model_profiles(self) -> dict[str, dict]:
+        """DiT checkpoints the engine can be started with, and the sampling each one was trained for."""
+        return {
+            "base": {
+                "label": "Qwen-Image-2.1 (base)",
+                "path": self.diffusion_model,
+                "steps": None,  # user-controlled
+                "cfg_scale": None,
+                "sigmas": None,
+                "note": "Full model. 20–40 steps, CFG 3–6. Turbo LoRAs (Mode) apply here.",
+            },
+            "turbo": {
+                "label": "Qwen-Image-2.1-Turbo (official 8-step)",
+                "path": self.diffusion_model_turbo,
+                "steps": 8,
+                "cfg_scale": 1.0,
+                # sample_sigmas from Qwen/Qwen-Image-2.1-Turbo model_index.json, plus sd.cpp's terminal 0
+                "sigmas": [1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0.0],
+                "note": "Distilled checkpoint: 8 steps, no CFG, 2K-capable. Switching models restarts the engine (~10 s).",
+            },
+        }
+
+    def diffusion_model_for(self, model: str) -> Path:
+        profiles = self.model_profiles()
+        if model not in profiles:
+            raise KeyError(model)
+        return profiles[model]["path"]
+
+    def engine_args(self, model: str | None = None) -> list[str]:
+        dit = self.diffusion_model_for(model or self.default_model)
         args = [
             str(self.engine_binary),
             "--listen-ip", self.engine_host,
             "--listen-port", str(self.engine_port),
-            "--diffusion-model", str(self.diffusion_model),
+            "--diffusion-model", str(dit),
             "--vae", str(self.vae),
             "--llm", str(self.text_encoder),
             "--sampling-method", self.default_sampler,
@@ -107,10 +141,10 @@ class Settings:
             args += self.engine_extra_args.split()
         return args
 
-    def missing_files(self) -> list[str]:
+    def missing_files(self, model: str | None = None) -> list[str]:
         required = {
             "engine binary": self.engine_binary,
-            "diffusion model": self.diffusion_model,
+            "diffusion model": self.diffusion_model_for(model or self.default_model),
             "text encoder": self.text_encoder,
             "vae": self.vae,
         }

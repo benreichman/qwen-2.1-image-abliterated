@@ -26,6 +26,7 @@ class Engine:
         self.ready_at: float | None = None
         self.logs: collections.deque[str] = collections.deque(maxlen=400)
         self.progress: dict[str, Any] | None = None  # {step, total, rate, unit, at}
+        self.current_model: str | None = None  # key of Settings.model_profiles()
         self._log_task: asyncio.Task | None = None
         self._client = httpx.AsyncClient(base_url=settings.engine_url, timeout=httpx.Timeout(30.0, read=120.0))
         self._lock = asyncio.Lock()
@@ -40,8 +41,9 @@ class Engine:
             "ready_at": self.ready_at,
             "url": self.settings.engine_url,
             "progress": self.progress,
+            "current_model": self.current_model,
             "models": {
-                "diffusion_model": self.settings.diffusion_model.name,
+                "diffusion_model": self.settings.diffusion_model_for(self.current_model or self.settings.default_model).name,
                 "text_encoder": self.settings.text_encoder.name,
                 "text_encoder_vision": self.settings.text_encoder_vision.name if self.settings.text_encoder_vision else None,
                 "vae": self.settings.vae.name,
@@ -50,23 +52,26 @@ class Engine:
         }
 
     # --------------------------------------------------------------- lifecycle
-    async def start(self) -> None:
+    async def start(self, model: str | None = None) -> None:
+        model = model or self.current_model or self.settings.default_model
         async with self._lock:
             if self.proc and self.proc.returncode is None:
                 return
-            missing = self.settings.missing_files()
+            missing = self.settings.missing_files(model)
             if missing:
                 self.state, self.error = "error", "missing files: " + "; ".join(missing)
                 return
             # An sd-server may already be running externally on the port: adopt it.
             if await self._probe():
                 self.state, self.error, self.ready_at = "ready", None, time.time()
+                self.current_model = model
                 self.logs.append("[backend] adopted an already-running sd-server")
                 return
 
             self.state, self.error = "starting", None
             self.started_at, self.ready_at = time.time(), None
-            args = self.settings.engine_args()
+            self.current_model = model
+            args = self.settings.engine_args(model)
             self.logs.append("[backend] launching: " + " ".join(args))
             try:
                 self.proc = await asyncio.create_subprocess_exec(
@@ -95,9 +100,25 @@ class Engine:
         self.state = "stopped"
         self.progress = None
 
-    async def restart(self) -> None:
+    async def restart(self, model: str | None = None) -> None:
         await self.stop()
-        await self.start()
+        await self.start(model)
+
+    async def ensure_model(self, model: str, timeout: float | None = None) -> None:
+        """Make sure sd-server is running with the given DiT; restart (and wait for ready) if not."""
+        if self.state == "ready" and self.current_model == model:
+            return
+        if self.state != "starting" or self.current_model != model:
+            self.logs.append(f"[backend] switching model -> {model}")
+            await self.restart(model)
+        deadline = time.time() + (timeout or self.settings.engine_startup_timeout_s)
+        while time.time() < deadline:
+            if self.state == "ready":
+                return
+            if self.state == "error":
+                raise EngineUnavailable(f"engine failed to start with model {model!r}: {self.error}")
+            await asyncio.sleep(0.5)
+        raise EngineUnavailable(f"engine did not become ready with model {model!r} in time")
 
     async def close(self) -> None:
         await self.stop()

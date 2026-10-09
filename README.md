@@ -18,11 +18,13 @@ behind a small FastAPI backend and a React + TypeScript web UI.
 | Part | File | Source |
 | --- | --- | --- |
 | DiT (image model, 7B) | `qwen-image-2.1-UC-Q4_K_M.gguf` (4.6 GB) | [abenzerps/Qwen-Image-2.1-Uncensored-GGUF](https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF) |
+| Turbo DiT (official 8-step distill) | `qwen-image-2.1-turbo-Q4_K.gguf` (4.1 GB) | [DogukanUrker/Qwen-Image-2.1-Turbo-GGUF](https://huggingface.co/DogukanUrker/Qwen-Image-2.1-Turbo-GGUF) (sd.cpp conversion of [Qwen/Qwen-Image-2.1-Turbo](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo)) |
 | Text encoder (Qwen3-VL-8B, refusal-ablated) | `qwen3vl_8b_heretic-Q4_K_M.gguf` (5.0 GB) | [pottokao/…-Text-Encoder-Heretic-GGUF](https://huggingface.co/pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-GGUF) |
 | Vision projector (needed for image editing) | `mmproj-qwen3vl_8b_heretic-f16.gguf` (1.2 GB) | same |
 | VAE | `qwen_image_2.1_vae_bf16.safetensors` (0.7 GB) | abenzerps repo (repack of Comfy-Org) |
 
-Swap the DiT for the stock weights with `--dit base`, or a different quant with `--dit-quant Q6_K` / `Q8_0`.
+Swap the DiT for the stock weights with `--dit base`, or a different quant with `--dit-quant Q6_K` / `Q8_0`;
+`--turbo-quant Q8_0` for the Turbo DiT, `--no-turbo` to skip it.
 
 ## Requirements
 
@@ -104,7 +106,8 @@ trades quality for memory or time; turn them up as far as your hardware allows.
 | CFG | 4.0 | 4–6 | Stronger prompt adherence; taste, not a compromise. |
 | VAE | bf16 | bf16 | Already full quality. |
 | Flash attention | on | on | No quality cost, keep it on. |
-| Turbo LoRA | off | off for final renders; on for iteration | 8 steps without CFG ≈ 10× less DiT work, at a quality cost (see below). |
+| Model | base | base + 40 steps for final renders; **official Turbo** for iteration | Turbo: 8 steps, no CFG, 2K-capable, ~10× less DiT work. |
+| Pruna LoRA (base only) | off | off | 1K-only v0.1 distill; superseded by the official Turbo for most uses. |
 
 Memory budget for the whole set (weights only; add ~3–5 GB of compute buffers at 2K):
 
@@ -139,7 +142,27 @@ In the UI, pick the **2K** size tier and drag steps to 40. To make those the def
 `frontend/src/App.tsx`. The frontend remembers your last-used settings in `localStorage`, so after the first change
 they stick anyway.
 
-### Turbo mode: Pruna few-step LoRAs (8 or 5 steps, no CFG)
+### Official Qwen-Image-2.1-Turbo (8 steps, no CFG, 2K)
+
+On 2026-10-09 Qwen released [Qwen-Image-2.1-Turbo](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo): an accelerated
+**full checkpoint** of the 7B DiT (same architecture, same text encoder and VAE) that generates and edits in 8 steps
+with CFG 1, and unlike the Pruna LoRAs it is trained for the full 2K presets. Because only the DiT changes, the
+abliterated text encoder keeps working with it unchanged.
+
+- `scripts/download_models.py` fetches the Q4_K GGUF (4.1 GB) by default; `--turbo-quant Q8_0` for near-lossless.
+- In the UI pick **Model → Qwen-Image-2.1-Turbo**. The backend restarts `sd-server` with the Turbo DiT (~10 s with
+  warm disk cache) and locks steps 8, CFG 1 and the checkpoint's schedule. Switching back to base restarts again.
+- API: `"model": "turbo"` on `/api/generate`. `POST /api/engine/restart {"model": "turbo"}` preloads it.
+- The schedule is the `sample_sigmas` from the checkpoint's `model_index.json` plus sd.cpp's terminal 0:
+  `1, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0`. Qwen says other schedules are
+  unevaluated, so the backend does not expose steps/CFG for this model.
+- `QI_DEFAULT_MODEL=turbo` in `.env` makes it the DiT loaded at startup.
+
+**Turbo vs. Pruna LoRA:** the official Turbo replaces the DiT and targets 2K at base-model quality; the Pruna LoRAs
+sit on the base DiT, are 1K-only and v0.1 quality. Prefer the official Turbo for iteration; use base + 40 steps
+when you want the reference quality.
+
+### Pruna few-step LoRAs on the base model (8 or 5 steps, no CFG)
 
 [PrunaAI/Pruna-Qwen-Image-2.1](https://huggingface.co/PrunaAI/Pruna-Qwen-Image-2.1) ships DMD-distilled LoRA
 adapters that let the *same* base model, text encoder and VAE finish in 8 steps (recommended) or 5 steps (faster,

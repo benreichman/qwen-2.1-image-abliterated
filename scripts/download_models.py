@@ -4,6 +4,7 @@
 Components (all GGUF/safetensors, loaded by stable-diffusion.cpp):
 
   * DiT (the image model itself)     -> models/diffusion_models/
+  * Official Turbo DiT (8-step)      -> models/diffusion_models/   (4 GB at Q4_K)
   * Text encoder (Heretic-abliterated Qwen3-VL-8B) + vision projector -> models/text_encoders/
   * VAE                                -> models/vae/
   * Pruna few-step LoRA (turbo mode)   -> models/loras/   (optional, 335 MB each)
@@ -49,6 +50,12 @@ TEXT_ENCODER_MMPROJ = "mmproj-qwen3vl_8b_heretic-f16.gguf"
 VAE_REPO = "abenzerps/Qwen-Image-2.1-Uncensored-GGUF"
 VAE_FILE = "vae/qwen_image_2.1_vae_bf16.safetensors"
 
+# Official 8-step distilled checkpoint (full DiT, same TE/VAE): https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo
+# GGUF conversion made and tested with stable-diffusion.cpp.
+TURBO_REPO = "DogukanUrker/Qwen-Image-2.1-Turbo-GGUF"
+TURBO_PATTERN = "qwen-image-2.1-turbo-{quant}.gguf"
+TURBO_QUANTS = ["Q3_K", "Q4_K", "Q5_0", "Q6_K", "Q8_0"]
+
 # Few-step distillation LoRAs (optional "turbo" mode): https://huggingface.co/PrunaAI/Pruna-Qwen-Image-2.1
 LORA_REPO = "PrunaAI/Pruna-Qwen-Image-2.1"
 LORA_FILES = {
@@ -81,9 +88,11 @@ def main() -> int:
     ap.add_argument("--dit", choices=DIT_SOURCES.keys(), default="uc", help="DiT variant (default: uc)")
     ap.add_argument("--dit-quant", default="Q4_K_M", help="DiT quantization (default: Q4_K_M)")
     ap.add_argument("--no-vision", action="store_true", help="skip the vision projector (disables image editing)")
+    ap.add_argument("--turbo-quant", default="Q4_K", help=f"official Turbo DiT quant, one of {TURBO_QUANTS} (default: Q4_K)")
+    ap.add_argument("--no-turbo", action="store_true", help="skip the official Qwen-Image-2.1-Turbo DiT")
     ap.add_argument("--lora", choices=["8step", "5step", "both", "none"], default="8step",
                     help="Pruna few-step LoRA(s) for turbo mode (default: 8step)")
-    ap.add_argument("--only", choices=["dit", "te", "vae", "lora"], help="download a single component")
+    ap.add_argument("--only", choices=["dit", "turbo", "te", "vae", "lora"], help="download a single component")
     args = ap.parse_args()
 
     src = DIT_SOURCES[args.dit]
@@ -95,6 +104,12 @@ def main() -> int:
     if args.only in (None, "dit"):
         print("DiT:")
         fetch(src["repo"], src["pattern"].format(quant=args.dit_quant), MODELS / "diffusion_models", src["revision"])
+    if args.only in (None, "turbo") and not args.no_turbo:
+        if args.turbo_quant not in TURBO_QUANTS:
+            print(f"unknown turbo quant {args.turbo_quant!r}; choose from {TURBO_QUANTS}", file=sys.stderr)
+            return 2
+        print("Official Qwen-Image-2.1-Turbo DiT (8-step):")
+        fetch(TURBO_REPO, TURBO_PATTERN.format(quant=args.turbo_quant), MODELS / "diffusion_models")
     if args.only in (None, "te"):
         print("Text encoder (Heretic abliterated Qwen3-VL-8B):")
         fetch(TEXT_ENCODER_REPO, TEXT_ENCODER_FILE, MODELS / "text_encoders")

@@ -71,6 +71,16 @@ ACCELERATORS: dict[str, dict[str, Any]] = {
 }
 
 
+def available_models() -> list[dict[str, Any]]:
+    out = []
+    for key, m in settings.model_profiles().items():
+        out.append({
+            "id": key, "label": m["label"], "file": m["path"].name, "available": m["path"].exists(),
+            "steps": m["steps"], "cfg_scale": m["cfg_scale"], "note": m["note"],
+        })
+    return out
+
+
 def available_accelerators() -> list[dict[str, Any]]:
     out = []
     for key, a in ACCELERATORS.items():
@@ -100,7 +110,8 @@ class GenerateRequest(BaseModel):
     ref_images: list[str] = Field(default_factory=list, max_length=10)  # data URLs / base64
     strength: float = Field(default=1.0, ge=0.0, le=1.0)
     output_format: Literal["png", "jpeg", "webp"] = "png"
-    accelerator: str = "none"  # key of ACCELERATORS; overrides steps/cfg/sigmas and adds its LoRA
+    model: str = settings.default_model  # key of Settings.model_profiles(): "base" | "turbo"
+    accelerator: str = "none"  # key of ACCELERATORS (base model only); overrides steps/cfg/sigmas and adds its LoRA
     lora: list[LoraRef] = Field(default_factory=list)  # extra LoRAs (relative to QI_LORA_DIR)
     custom_sigmas: list[float] | None = None  # steps + 1 values ending in 0; overrides the scheduler
 
@@ -158,9 +169,19 @@ def _build_engine_body(req: GenerateRequest) -> dict[str, Any]:
         prompt = f"{RGBA_PREFIX}{prompt.rstrip('.')}.{RGBA_SUFFIX}"
     steps, cfg, sigmas = req.steps, req.cfg_scale, req.custom_sigmas
     loras = [{"path": l.path, "multiplier": l.multiplier} for l in req.lora]
-    accel = ACCELERATORS.get(req.accelerator)
-    if accel is None:
-        raise HTTPException(status_code=422, detail=f"unknown accelerator {req.accelerator!r}; one of {list(ACCELERATORS)}")
+    profiles = settings.model_profiles()
+    profile = profiles.get(req.model)
+    if profile is None:
+        raise HTTPException(status_code=422, detail=f"unknown model {req.model!r}; one of {list(profiles)}")
+    if not profile["path"].exists():
+        raise HTTPException(status_code=422, detail=f"model file {profile['path'].name} not found; run scripts/download_models.py")
+    if profile["steps"] is not None:  # distilled checkpoint: fixed schedule, no CFG, no accelerator LoRA
+        steps, cfg, sigmas = profile["steps"], profile["cfg_scale"], profile["sigmas"]
+        accel = ACCELERATORS["none"]
+    else:
+        accel = ACCELERATORS.get(req.accelerator)
+        if accel is None:
+            raise HTTPException(status_code=422, detail=f"unknown accelerator {req.accelerator!r}; one of {list(ACCELERATORS)}")
     if accel.get("file"):
         if not (settings.lora_dir / accel["file"]).exists():
             raise HTTPException(status_code=422, detail=f"LoRA {accel['file']} not found in {settings.lora_dir}; run scripts/download_models.py --only lora")
@@ -254,8 +275,9 @@ async def config() -> dict[str, Any]:
             "sampler": settings.default_sampler,
         },
         "size_presets": SIZE_PRESETS,
+        "models": available_models(),
         "accelerators": available_accelerators(),
-        "models": engine.status()["models"],
+        "loaded": engine.status()["models"],
     }
 
 
@@ -273,6 +295,7 @@ async def generate(req: GenerateRequest) -> JobRecord:
         raise HTTPException(status_code=422, detail="width and height must be divisible by 32")
     body = _build_engine_body(req)
     try:
+        await engine.ensure_model(req.model)  # restarts sd-server with the other DiT if needed (~10 s)
         submitted = await engine.submit_img_gen(body)
     except Exception as exc:  # noqa: BLE001
         raise _bad_engine(exc) from exc
@@ -348,9 +371,16 @@ async def engine_start() -> dict[str, Any]:
     return engine.status()
 
 
+class EngineRestartRequest(BaseModel):
+    model: str | None = None
+
+
 @app.post("/api/engine/restart")
-async def engine_restart() -> dict[str, Any]:
-    await engine.restart()
+async def engine_restart(req: EngineRestartRequest | None = None) -> dict[str, Any]:
+    model = req.model if req else None
+    if model is not None and model not in settings.model_profiles():
+        raise HTTPException(status_code=422, detail=f"unknown model {model!r}")
+    await engine.restart(model)
     return engine.status()
 
 

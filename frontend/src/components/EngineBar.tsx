@@ -8,7 +8,7 @@ interface Props {
 
 const LABEL: Record<EngineStatus['state'], string> = {
   stopped: 'engine stopped',
-  starting: 'loading models…',
+  starting: 'loading model…',
   ready: 'ready',
   error: 'engine error',
 }
@@ -51,7 +51,7 @@ export function EngineBar({ status, offline }: Props) {
         {status?.error && <span className="muted small"> — {status.error}</span>}
         {status && (
           <span className="muted small models" title={`${status.models.diffusion_model}\n${status.models.text_encoder}\n${status.models.vae}`}>
-            {status.models.diffusion_model.replace(/\.gguf$/, '')} · {status.models.text_encoder.replace(/\.gguf$/, '')}
+            {status.current_model ? `[${status.current_model}] ` : ''}{status.models.diffusion_model.replace(/\.gguf$/, '')} · {status.models.text_encoder.replace(/\.gguf$/, '')}
           </span>
         )}
         <button type="button" className="ghost small" onClick={() => setShowLogs((v) => !v)}>

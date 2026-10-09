@@ -16,6 +16,7 @@ export interface EngineStatus {
   ready_at: number | null
   url: string
   progress: EngineProgress | null
+  current_model: string | null
   models: {
     diffusion_model: string
     text_encoder: string
@@ -42,11 +43,22 @@ export interface Accelerator {
   file: string | null
 }
 
+export interface ModelProfile {
+  id: string
+  label: string
+  file: string
+  available: boolean
+  steps: number | null
+  cfg_scale: number | null
+  note: string | null
+}
+
 export interface AppConfig {
   defaults: { width: number; height: number; steps: number; cfg_scale: number; sampler: string }
   size_presets: SizePreset[]
+  models: ModelProfile[]
   accelerators: Accelerator[]
-  models: EngineStatus['models']
+  loaded: EngineStatus['models']
 }
 
 export interface GenerateParams {
@@ -63,6 +75,7 @@ export interface GenerateParams {
   ref_images: string[]
   strength: number
   output_format: 'png' | 'jpeg' | 'webp'
+  model: string
   accelerator: string
 }
 
@@ -126,7 +139,8 @@ export const api = {
     request<{ items: ImageRecord[]; total: number }>(`/api/history?limit=${limit}&offset=${offset}`),
   deleteImage: (id: string) => request<void>(`/api/history/${id}`, { method: 'DELETE' }),
   logs: (tail = 120) => request<{ lines: string[]; status: EngineStatus }>(`/api/engine/logs?tail=${tail}`),
-  restartEngine: () => request<EngineStatus>('/api/engine/restart', { method: 'POST' }),
+  restartEngine: (model?: string) =>
+    request<EngineStatus>('/api/engine/restart', { method: 'POST', body: JSON.stringify(model ? { model } : {}) }),
   startEngine: () => request<EngineStatus>('/api/engine/start', { method: 'POST' }),
 }
 
